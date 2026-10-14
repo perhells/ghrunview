@@ -40,6 +40,25 @@ allows `eval`, refreshed from the server on every page load. After upgrading
 and restarting the server, run "Check for userscript updates" in
 Tampermonkey (or reinstall from the link) to pick up a new version.
 
+## Run it in the background
+
+So the userscript always finds a server, install it as a per-user service
+(launchd on macOS, `systemd --user` on Linux). It starts at login, restarts
+if it dies, and logs to `~/Library/Logs/ghrunview.log` or the user journal.
+
+```sh
+ghrunview service install             # default 127.0.0.1:8788
+ghrunview service install -addr 127.0.0.1:9000
+ghrunview service status
+ghrunview service uninstall
+```
+
+The service runs the binary it was installed from, so after `go install`
+run `service install` again to pick up the new build. Token lookup via
+`gh auth token` works under the service because the directory of `gh` is
+added to its PATH; alternatively set `GH_TOKEN` in the generated plist or
+unit.
+
 ## Using the graph
 
 - Reusable-workflow boxes start collapsed; click to expand, click again to
@@ -90,6 +109,7 @@ internal/gh             REST client (runs, jobs, raw file contents)
 internal/workflow       YAML -> job definitions
 internal/graph          match API jobs to definitions, nest reusable workflows
 internal/server         /api/config, /api/runs, /api/runs/{id}, /ghrunview.user.js, static UI
+internal/service        launchd / systemd user service install, uninstall, status
 web/graph.js            shared renderer (layout, routing, SVG, hover/select, side panel)
 web/app.js              standalone page: routing, run list, run header
 web/userscript.js       Tampermonkey shim; served with a generated header

@@ -17,6 +17,7 @@ import (
 
 	"github.com/perhells/ghrunview/internal/gh"
 	"github.com/perhells/ghrunview/internal/server"
+	"github.com/perhells/ghrunview/internal/service"
 )
 
 //go:embed web
@@ -25,6 +26,10 @@ var web embed.FS
 var remoteRe = regexp.MustCompile(`github\.com[:/]([\w.-]+/[\w.-]+?)(?:\.git)?$`)
 
 func main() {
+	if len(os.Args) > 1 && os.Args[1] == "service" {
+		serviceCmd(os.Args[2:])
+		return
+	}
 	addr := flag.String("addr", "127.0.0.1:8788", "listen address")
 	repo := flag.String("repo", "", "owner/name (default: origin remote of cwd)")
 	open := flag.Bool("open", true, "open the browser on start")
@@ -57,6 +62,36 @@ func main() {
 		openBrowser(url)
 	}
 	log.Fatal(http.Serve(ln, srv.Handler()))
+}
+
+// serviceCmd handles `ghrunview service install|uninstall|status`.
+func serviceCmd(args []string) {
+	fs := flag.NewFlagSet("service", flag.ExitOnError)
+	addr := fs.String("addr", "127.0.0.1:8788", "listen address for the background server")
+	fs.Usage = func() {
+		fmt.Fprintln(os.Stderr, "usage: ghrunview service install [-addr host:port] | uninstall | status")
+		fs.PrintDefaults()
+	}
+	if len(args) == 0 {
+		fs.Usage()
+		os.Exit(2)
+	}
+	_ = fs.Parse(args[1:])
+	var err error
+	switch args[0] {
+	case "install":
+		err = service.Install(*addr)
+	case "uninstall":
+		err = service.Uninstall()
+	case "status":
+		err = service.Status()
+	default:
+		fs.Usage()
+		os.Exit(2)
+	}
+	if err != nil {
+		log.Fatal(err)
+	}
 }
 
 func repoFromGit() string {
