@@ -392,6 +392,7 @@ const GHRV = (() => {
 .ghrv .ghrv-dag { position: relative; }
 .ghrv .ghrv-dag svg { display: block; width: 100%; height: 100%; }
 .ghrv .ghrv-warn { padding: 8px 12px; color: var(--run); font-size: 12px; border-bottom: 1px solid var(--b); }
+.ghrv .ghrv-warn.ghrv-note { color: var(--m); }
 .ghrv .ghrv-side { background: var(--p); border: 1px solid var(--b); border-radius: 8px; padding: 14px; overflow: auto; overscroll-behavior: contain; }
 .ghrv .ghrv-side h2 { font-size: 15px; font-weight: 600; margin: 0 0 6px; word-break: break-word; display: flex; align-items: center; gap: 6px; }
 .ghrv .ghrv-side .ghrv-kv { color: var(--m); font-size: 12px; margin-bottom: 10px; }
@@ -839,8 +840,9 @@ const GHRV = (() => {
         const first = !st.data;
         st.data = data;
         const warn = $('.ghrv-warn');
-        warn.hidden = !data.workflow?.error;
-        warn.textContent = data.workflow?.error ? `Could not load ${data.workflow.path || 'the workflow file'} at this commit (${data.workflow.error}), so jobs are shown without dependencies.` : '';
+        warn.hidden = !data.workflow?.error && !data.partial;
+        warn.classList.toggle('ghrv-note', !!data.partial && !data.workflow?.error);
+        warn.textContent = data.workflow?.error ? `Could not load ${data.workflow.path || 'the workflow file'} at this commit (${data.workflow.error}), so jobs are shown without dependencies.` : data.partial ? 'Loading jobs…' : '';
         const cap = $('.ghrv-caption'), run = data.run || {}, path = data.workflow?.path || run.path || '';
         if (path) {
           const base = path.slice(path.lastIndexOf('/') + 1);

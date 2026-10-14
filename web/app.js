@@ -21,6 +21,36 @@ async function api(path, params = {}) {
   return body;
 }
 
+// apiStream reads the two-line NDJSON run response, handing the skeleton to onPartial first.
+async function apiStream(path, onPartial) {
+  const u = new URL(path, location.origin);
+  u.searchParams.set('repo', state.repo);
+  const r = await fetch(u);
+  if (!r.ok) {
+    const body = await r.json().catch(() => ({}));
+    throw new Error(body.error || `${r.status} ${r.statusText}`);
+  }
+  const reader = r.body.getReader(), dec = new TextDecoder();
+  let buf = '', last = null;
+  const take = line => {
+    if (!line.trim()) return;
+    const obj = JSON.parse(line);
+    if (obj.error) throw new Error(obj.error);
+    last = obj;
+    if (obj.partial) onPartial(obj);
+  };
+  for (;;) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    buf += dec.decode(value, { stream: true });
+    let i;
+    while ((i = buf.indexOf('\n')) >= 0) { take(buf.slice(0, i)); buf = buf.slice(i + 1); }
+  }
+  take(buf);
+  if (!last || last.partial) throw new Error('incomplete response from server');
+  return last;
+}
+
 function clearTimers() { timers.forEach(clearInterval); timers = []; }
 function every(ms, fn) { timers.push(setInterval(() => { if (!document.hidden) fn(); }, ms)); }
 const showError = e => { app.innerHTML = `<div class="error">${esc(e.message || e)}</div>`; };
@@ -148,15 +178,18 @@ function renderRuns() {
 async function showRun(id, expandAll, myGen) {
   app.innerHTML = '<div class="empty">Loading…</div>';
   state.run = null;
+  const show = res => {
+    const first = !state.run;
+    state.run = res;
+    if (first) renderRunHead();
+    else document.getElementById('run-badge').innerHTML = badge(stateOf(res.run));
+    state.view.update(res);
+  };
   const load = async () => {
     try {
-      const res = await api(`/api/runs/${id}`);
+      const res = await apiStream(`/api/runs/${id}`, partial => { if (myGen === gen && !state.run) show(partial); });
       if (myGen !== gen) return;
-      const first = !state.run;
-      state.run = res;
-      if (first) renderRunHead();
-      else document.getElementById('run-badge').innerHTML = badge(stateOf(res.run));
-      state.view.update(res);
+      show(res);
       if (res.run.status === 'completed') clearTimers();
     } catch (e) {
       if (myGen !== gen) return;

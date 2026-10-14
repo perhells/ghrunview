@@ -43,14 +43,34 @@
     return m ? { repo: m[1], id: m[2], attempt: m[3] || '' } : null;
   }
 
-  function request(url) {
+  // request reads the server's two-line NDJSON answer progressively: the skeleton line goes to
+  // onPartial as soon as it arrives, the promise resolves with the final line.
+  function request(url, onPartial) {
     return new Promise((resolve, reject) => {
+      let seen = 0, last = null, failed = null;
+      const consume = (text, final) => {
+        if (failed) return;
+        let end;
+        while ((end = text.indexOf('\n', seen)) >= 0 || (final && seen < text.length)) {
+          const line = end >= 0 ? text.slice(seen, end) : text.slice(seen);
+          seen = end >= 0 ? end + 1 : text.length;
+          if (!line.trim()) continue;
+          const obj = safeJSON(line);
+          if (!obj) continue;
+          if (obj.error) { failed = new Error(obj.error); return; }
+          last = obj;
+          if (obj.partial && onPartial) onPartial(obj);
+        }
+      };
       GM_xmlhttpRequest({
-        method: 'GET', url, timeout: 20000, responseType: 'json',
+        method: 'GET', url, timeout: 60000,
+        onprogress: r => { if (r.status >= 200 && r.status < 300 && typeof r.responseText === 'string') consume(r.responseText, false); },
         onload: r => {
-          const body = typeof r.response === 'string' ? safeJSON(r.response) : r.response;
-          if (r.status >= 200 && r.status < 300) resolve(body);
-          else reject(new Error((body && body.error) || `${r.status} ${r.statusText}`));
+          if (r.status < 200 || r.status >= 300) { const body = safeJSON(r.responseText); return reject(new Error((body && body.error) || `${r.status} ${r.statusText}`)); }
+          consume(r.responseText, true);
+          if (failed) return reject(failed);
+          if (!last || last.partial) return reject(new Error('incomplete response from server'));
+          resolve(last);
         },
         onerror: () => reject(new Error(`ghrunview server not reachable at ${server()} (start it with \`ghrunview\`)`)),
         ontimeout: () => reject(new Error('ghrunview server timed out')),
@@ -107,10 +127,12 @@
     const me = { key: location.pathname, host, view, timer: null };
     current = me;
     const url = `${server()}/api/runs/${info.id}?repo=${encodeURIComponent(info.repo)}${info.attempt ? `&attempt=${info.attempt}` : ''}`;
+    let shown = false;
     const load = async () => {
       try {
-        const data = await request(url);
+        const data = await request(url, partial => { if (current === me && !shown) view.update(partial); });
         if (current !== me) return;
+        shown = true;
         view.update(data);
         if (data.run.status === 'completed') clearInterval(me.timer);
       } catch (e) {

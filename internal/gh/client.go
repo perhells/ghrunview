@@ -13,19 +13,31 @@ import (
 	"os/exec"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
-// Client calls the GitHub REST API with a bearer token.
+// Client calls the GitHub REST API with a bearer token. Responses are revalidated with ETags so an
+// unchanged resource costs a fast 304 and no rate-limit budget.
 type Client struct {
 	token string
 	http  *http.Client
 	base  string
+
+	mu    sync.Mutex
+	etags map[string]etagEntry
 }
+
+type etagEntry struct {
+	etag string
+	body []byte
+}
+
+const maxETags = 256
 
 // NewClient returns a client for api.github.com.
 func NewClient(token string) *Client {
-	return &Client{token: token, http: &http.Client{Timeout: 30 * time.Second}, base: "https://api.github.com"}
+	return &Client{token: token, http: &http.Client{Timeout: 30 * time.Second}, base: "https://api.github.com", etags: map[string]etagEntry{}}
 }
 
 // Token resolves a token from GH_TOKEN, GITHUB_TOKEN, or `gh auth token`.
@@ -143,6 +155,13 @@ func (c *Client) do(ctx context.Context, path string, q url.Values, accept strin
 		accept = "application/vnd.github+json"
 	}
 	req.Header.Set("Accept", accept)
+	cacheKey := accept + " " + u
+	c.mu.Lock()
+	prev, hasPrev := c.etags[cacheKey]
+	c.mu.Unlock()
+	if hasPrev {
+		req.Header.Set("If-None-Match", prev.etag)
+	}
 	resp, err := c.http.Do(req)
 	if err != nil {
 		return nil, nil, err
@@ -156,6 +175,17 @@ func (c *Client) do(ctx context.Context, path string, q url.Values, accept strin
 	rate.Remaining, _ = strconv.Atoi(resp.Header.Get("X-RateLimit-Remaining"))
 	if s, err := strconv.ParseInt(resp.Header.Get("X-RateLimit-Reset"), 10, 64); err == nil {
 		rate.Reset = time.Unix(s, 0)
+	}
+	if resp.StatusCode == http.StatusNotModified && hasPrev {
+		return prev.body, rate, nil
+	}
+	if etag := resp.Header.Get("ETag"); etag != "" && resp.StatusCode == 200 {
+		c.mu.Lock()
+		if len(c.etags) >= maxETags {
+			c.etags = map[string]etagEntry{}
+		}
+		c.etags[cacheKey] = etagEntry{etag: etag, body: body}
+		c.mu.Unlock()
 	}
 	if resp.StatusCode < 200 || resp.StatusCode > 299 {
 		var m struct {
@@ -240,13 +270,45 @@ func (c *Client) ListJobs(ctx context.Context, repo string, id int64, attempt in
 	return all, nil
 }
 
+// Entry is one item of a directory listing.
+type Entry struct {
+	Name string `json:"name"`
+	Path string `json:"path"`
+	SHA  string `json:"sha"`
+	Type string `json:"type"`
+}
+
+// ListDir returns the entries of a directory in repo at ref.
+func (c *Client) ListDir(ctx context.Context, repo, dir, ref string) ([]Entry, error) {
+	q := url.Values{"ref": {ref}}
+	body, _, err := c.do(ctx, "/repos/"+repo+"/contents/"+escapePath(dir), q, "")
+	if err != nil {
+		return nil, err
+	}
+	var entries []Entry
+	if err := json.Unmarshal(body, &entries); err != nil {
+		return nil, fmt.Errorf("%s is not a directory", dir)
+	}
+	return entries, nil
+}
+
+// Blob returns the raw content of a git blob; blobs are immutable so callers may cache by sha.
+func (c *Client) Blob(ctx context.Context, repo, sha string) ([]byte, error) {
+	body, _, err := c.do(ctx, "/repos/"+repo+"/git/blobs/"+url.PathEscape(sha), nil, "application/vnd.github.raw+json")
+	return body, err
+}
+
 // FileAt returns the raw content of path in repo at ref.
 func (c *Client) FileAt(ctx context.Context, repo, path, ref string) ([]byte, error) {
 	q := url.Values{"ref": {ref}}
+	body, _, err := c.do(ctx, "/repos/"+repo+"/contents/"+escapePath(path), q, "application/vnd.github.raw+json")
+	return body, err
+}
+
+func escapePath(path string) string {
 	segs := strings.Split(strings.TrimPrefix(path, "/"), "/")
 	for i, sg := range segs {
 		segs[i] = url.PathEscape(sg)
 	}
-	body, _, err := c.do(ctx, "/repos/"+repo+"/contents/"+strings.Join(segs, "/"), q, "application/vnd.github.raw+json")
-	return body, err
+	return strings.Join(segs, "/")
 }

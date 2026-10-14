@@ -102,8 +102,14 @@ ghrunview -dev                     # serve web/ from disk while developing
    edges. Dependabot, Pages and default-setup CodeQL runs have no workflow
    file and show their jobs without edges.
 
-Workflow files are cached per `sha` in memory for the lifetime of the
-process.
+The run endpoint streams two NDJSON lines: the graph skeleton built from the
+workflow files as soon as the run metadata is in (about half a second), then
+the same graph with jobs, steps and timings once GitHub's jobs call returns
+(one to five seconds depending on the number of jobs). Workflow files are
+resolved in parallel per nesting level and cached by blob SHA, so files that
+did not change between commits are never fetched twice; directory listings
+for branch or tag refs expire after ten minutes. REST responses are
+revalidated with ETags.
 
 ## Layout
 
