@@ -385,7 +385,7 @@ const GHRV = (() => {
 .ghrv .ghrv-dag.ghrv-dragging { cursor: grabbing; }
 .ghrv .ghrv-svg { flex: 1; min-height: 0; position: relative; }
 .ghrv .ghrv-hint { position: absolute; right: 10px; bottom: 6px; font-size: 11px; color: var(--m); opacity: .7; pointer-events: none; }
-.ghrv .ghrv-caption { position: absolute; left: 14px; top: 10px; pointer-events: none; line-height: 1.35; }
+.ghrv .ghrv-caption { position: absolute; left: 10px; top: 8px; padding: 4px 8px; border-radius: 6px; background: color-mix(in srgb, var(--p) 85%, transparent); pointer-events: none; line-height: 1.35; }
 .ghrv .ghrv-caption b { font-size: 15px; font-weight: 600; color: var(--t); }
 .ghrv .ghrv-caption a { color: var(--t); pointer-events: auto; }
 .ghrv .ghrv-caption div { font-size: 13px; color: var(--m); }
