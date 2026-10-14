@@ -3,6 +3,7 @@ package server
 import (
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"testing/fstest"
 )
@@ -32,6 +33,18 @@ func TestCheckWorkflowPath(t *testing.T) {
 	for _, p := range bad {
 		if checkWorkflowPath(p) == nil {
 			t.Errorf("%q accepted", p)
+		}
+	}
+}
+
+func TestRunResponseShape(t *testing.T) {
+	// The run handler must keep answering plain JSON unless stream=1 is requested.
+	for _, c := range []struct{ query, wantType string }{{"", "application/json"}, {"?stream=1", "application/x-ndjson"}} {
+		req := httptest.NewRequest(http.MethodGet, "http://127.0.0.1/api/runs/abc"+c.query, nil)
+		rec := httptest.NewRecorder()
+		New(nil, "o/r", fstest.MapFS{}, "").Handler().ServeHTTP(rec, req)
+		if rec.Code != 400 || !strings.HasPrefix(rec.Header().Get("Content-Type"), "application/json") {
+			t.Fatalf("%q: bad id should be a plain 400 JSON error, got %d %s", c.query, rec.Code, rec.Header().Get("Content-Type"))
 		}
 	}
 }

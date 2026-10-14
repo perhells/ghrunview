@@ -25,6 +25,7 @@ async function api(path, params = {}) {
 async function apiStream(path, onPartial) {
   const u = new URL(path, location.origin);
   u.searchParams.set('repo', state.repo);
+  u.searchParams.set('stream', '1');
   const r = await fetch(u);
   if (!r.ok) {
     const body = await r.json().catch(() => ({}));

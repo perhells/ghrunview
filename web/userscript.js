@@ -126,7 +126,7 @@
     applyHideGH();
     const me = { key: location.pathname, host, view, timer: null };
     current = me;
-    const url = `${server()}/api/runs/${info.id}?repo=${encodeURIComponent(info.repo)}${info.attempt ? `&attempt=${info.attempt}` : ''}`;
+    const url = `${server()}/api/runs/${info.id}?repo=${encodeURIComponent(info.repo)}&stream=1${info.attempt ? `&attempt=${info.attempt}` : ''}`;
     let shown = false;
     const load = async () => {
       try {

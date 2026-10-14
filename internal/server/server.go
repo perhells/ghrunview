@@ -206,8 +206,20 @@ func (s *Server) run(w http.ResponseWriter, r *http.Request) {
 	}
 	resolve := s.resolver(ctx, repo, run.HeadSHA)
 
-	// The response is NDJSON in two lines: the graph skeleton from the workflow files as soon as it is
-	// known, then the same object with jobs filled in once GitHub's (slow) jobs call returns.
+	// Older clients get one JSON object once everything is in.
+	if r.URL.Query().Get("stream") != "1" {
+		<-done
+		if jobsErr != nil {
+			writeErr(w, jobsErr)
+			return
+		}
+		resp.Nodes = graph.Build(wf, jobs, resolve)
+		writeJSON(w, 200, resp)
+		return
+	}
+
+	// Streaming clients get NDJSON in two lines: the graph skeleton from the workflow files as soon
+	// as it is known, then the same object with jobs filled in once GitHub's (slow) jobs call returns.
 	w.Header().Set("Content-Type", "application/x-ndjson")
 	w.Header().Set("Cache-Control", "no-store")
 	enc := json.NewEncoder(w)
