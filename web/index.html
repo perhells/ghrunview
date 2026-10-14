@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ghrunview</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="topbar">
+  <a class="brand" href="#/">ghrunview</a>
+  <form id="repo-form" class="repo-form">
+    <input id="repo-input" placeholder="owner/repo" spellcheck="false" autocomplete="off">
+    <button type="submit">Open</button>
+  </form>
+  <span id="rate" class="rate" title="GitHub API rate-limit remaining"></span>
+  <a class="us-link" href="/ghrunview.user.js" title="Install the Tampermonkey userscript that embeds this graph in github.com">Userscript</a>
+  <a id="gh-link" class="gh-link" target="_blank" rel="noopener" hidden>GitHub ↗</a>
+</header>
+<main id="app"></main>
+<script src="graph.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
