@@ -193,3 +193,25 @@ func TestExpressionMayBeEmpty(t *testing.T) {
 		t.Fatalf("empty expression value not matched: %v", ids(nodes))
 	}
 }
+
+func TestSameNameMatrixAndStatusJob(t *testing.T) {
+	wf, _ := workflow.Parse([]byte(`
+jobs:
+  test_go_oldest:
+    name: Go tests with previous Go version
+    strategy:
+      matrix:
+        go: ["1.21", "1.22"]
+  test_go_oldest_status:
+    name: Go tests with previous Go version
+    needs: test_go_oldest
+`))
+	nodes := Build(wf, []gh.Job{
+		job("Go tests with previous Go version (1.21)", ok("completed", "success")),
+		job("Go tests with previous Go version (1.22)", ok("completed", "success")),
+		job("Go tests with previous Go version", ok("completed", "success")),
+	}, nil)
+	if len(nodes) != 2 || len(nodes[0].Jobs) != 2 || len(nodes[1].Jobs) != 1 {
+		t.Fatalf("jobs: %d and %d", len(nodes[0].Jobs), len(nodes[1].Jobs))
+	}
+}

@@ -181,10 +181,12 @@ func collapseChain(n Node) Node {
 func matchers(defs []workflow.Job) []matcher {
 	var ms []matcher
 	for i, d := range defs {
+		// A matrix job whose name carries no expression always gets " (values)" appended by GitHub,
+		// so its matcher must insist on that suffix or it would also capture a same-named plain job.
 		if d.Name != "" {
-			ms = append(ms, matcher{idx: i, prio: 0, literal: len(exprRe.ReplaceAllString(d.Name, "")), re: nameRe(d.Name)})
+			ms = append(ms, matcher{idx: i, prio: 0, literal: len(exprRe.ReplaceAllString(d.Name, "")), re: nameRe(d.Name, d.Matrix && !hasExpr(d.Name))})
 		}
-		ms = append(ms, matcher{idx: i, prio: 1, literal: len(exprRe.ReplaceAllString(d.Key, "")), re: nameRe(d.Key)})
+		ms = append(ms, matcher{idx: i, prio: 1, literal: len(exprRe.ReplaceAllString(d.Key, "")), re: nameRe(d.Key, d.Matrix)})
 	}
 	// Longest literal first: a name that is only an expression matches anything and must go last.
 	sort.SliceStable(ms, func(a, b int) bool {
@@ -208,7 +210,7 @@ func match(ms []matcher, name string) (*matcher, string) {
 // nameRe matches "<name>", "<name> (matrix values)" and "<name>[ (...)] / <job in reusable workflow>".
 // Expressions may evaluate to anything including the empty string, in which case GitHub also
 // drops the space next to them, so spaces adjacent to an expression are optional.
-func nameRe(name string) *regexp.Regexp {
+func nameRe(name string, requireSuffix bool) *regexp.Regexp {
 	parts := exprRe.Split(name, -1)
 	var b strings.Builder
 	b.WriteString("^")
@@ -226,7 +228,11 @@ func nameRe(name string) *regexp.Regexp {
 		}
 		b.WriteString(regexp.QuoteMeta(p))
 	}
-	b.WriteString(`( \(.*?\))?(?: / (.*))?$`)
+	if requireSuffix {
+		b.WriteString(`( \(.*?\))(?: / (.*))?$`)
+	} else {
+		b.WriteString(`( \(.*?\))?(?: / (.*))?$`)
+	}
 	return regexp.MustCompile(b.String())
 }
 
