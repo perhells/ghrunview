@@ -13,12 +13,15 @@ timings for the selected job. It polls while a run is in progress.
 
 ## Install
 
-1. Build and start the server. It reads your token from `GH_TOKEN`,
-   `GITHUB_TOKEN` or `gh auth token` and only listens on loopback.
+1. Install the binary and start the server, either as a login service that
+   keeps running in the background (see below) or in the foreground. It
+   reads your token from `GH_TOKEN`, `GITHUB_TOKEN` or `gh auth token` and
+   only listens on loopback.
 
    ```sh
    go install github.com/perhells/ghrunview@latest
-   ghrunview -open=false
+   ghrunview service install      # background, starts at login
+   ghrunview -open=false          # or: foreground, this terminal only
    ```
 
 2. With [Tampermonkey](https://www.tampermonkey.net/) installed, open
@@ -45,6 +48,7 @@ Tampermonkey (or reinstall from the link) to pick up a new version.
 So the userscript always finds a server, install it as a per-user service
 (launchd on macOS, `systemd --user` on Linux). It starts at login, restarts
 if it dies, and logs to `~/Library/Logs/ghrunview.log` or the user journal.
+Nothing is installed unless you run this yourself.
 
 ```sh
 ghrunview service install             # default 127.0.0.1:8788
