@@ -126,6 +126,13 @@ func build(wf *workflow.Workflow, jobs []relJob, resolve Resolver, depth int) []
 			}
 		}
 		if len(insts[i]) == 0 {
+			// No jobs reported yet (skeleton, or the call has not started): still show the called
+			// workflow's structure so the graph does not change shape once jobs arrive.
+			if all[i].Uses != "" && len(nodes[i].Jobs) == 0 && resolve != nil && depth < maxDepth {
+				if child, err := resolve(all[i].Uses); err == nil && child != nil {
+					nodes[i].Children = build(child, nil, resolve, depth+1)
+				}
+			}
 			continue
 		}
 		nodes[i].Reusable = true

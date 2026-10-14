@@ -200,7 +200,7 @@ async function showRun(id, expandAll, myGen) {
   };
   const host = document.createElement('div');
   state.viewHost = host;
-  state.view = GHRV.mount(host, { expandAll });
+  state.view = GHRV.mount(host, { expandAll, loadJob: jobId => api(`/api/jobs/${jobId}`) });
   await load();
   if (myGen !== gen) return;
   if (state.run && state.run.run.status !== 'completed') every(5000, load);

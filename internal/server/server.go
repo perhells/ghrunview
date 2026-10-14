@@ -68,6 +68,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/config", s.config)
 	mux.HandleFunc("GET /api/runs", s.runs)
 	mux.HandleFunc("GET /api/runs/{id}", s.run)
+	mux.HandleFunc("GET /api/jobs/{id}", s.job)
 	mux.HandleFunc("GET /ghrunview.user.js", s.userscript)
 	mux.Handle("GET /", http.FileServerFS(s.ui))
 	return logging(s.hostCheck(mux))
@@ -181,17 +182,24 @@ func (s *Server) run(w http.ResponseWriter, r *http.Request) {
 	attempt, _ := strconv.Atoi(r.URL.Query().Get("attempt"))
 	ctx := r.Context()
 
-	// The jobs call is the slowest; the workflow files are resolved while it is in flight.
-	var jobs []gh.Job
-	var jobsErr error
-	done := make(chan struct{})
-	go func() { defer close(done); jobs, jobsErr = s.gh.ListJobs(ctx, repo, id, attempt) }()
 	run, err := s.gh.GetRun(ctx, repo, id)
 	if err != nil {
-		<-done
 		writeErr(w, err)
 		return
 	}
+	// Jobs come from the check-runs endpoint (fast, no steps; steps are loaded per job on demand) and
+	// are fetched while the workflow files are resolved. Attempt views keep the jobs endpoint.
+	var jobs []gh.Job
+	var jobsErr error
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		if attempt == 0 && run.CheckSuiteID > 0 {
+			jobs, jobsErr = s.gh.ListCheckRuns(ctx, repo, run.CheckSuiteID)
+		} else {
+			jobs, jobsErr = s.gh.ListJobs(ctx, repo, id, attempt)
+		}
+	}()
 
 	resp := runResponse{Run: run, Fetched: time.Now(), Workflow: workflowInfo{Name: run.Name, Path: run.Path}}
 	var wf *workflow.Workflow
@@ -249,6 +257,24 @@ func errMessage(err error) string {
 		return apiErr.Message
 	}
 	return err.Error()
+}
+
+func (s *Server) job(w http.ResponseWriter, r *http.Request) {
+	repo, ok := s.repo(w, r)
+	if !ok {
+		return
+	}
+	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	if err != nil {
+		writeJSON(w, 400, map[string]string{"error": "bad job id"})
+		return
+	}
+	j, err := s.gh.GetJob(r.Context(), repo, id)
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	writeJSON(w, 200, j)
 }
 
 // prefetch resolves every uses: reference reachable from wf one level at a time, in parallel, so

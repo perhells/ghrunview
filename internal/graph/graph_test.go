@@ -215,3 +215,33 @@ jobs:
 		t.Fatalf("jobs: %d and %d", len(nodes[0].Jobs), len(nodes[1].Jobs))
 	}
 }
+
+func TestSkeletonWithoutJobs(t *testing.T) {
+	wf, _ := workflow.Parse([]byte(top))
+	resolve := func(uses string) (*workflow.Workflow, error) {
+		switch uses {
+		case "./.github/workflows/env.yml":
+			return workflow.Parse([]byte(env))
+		case "./.github/workflows/svc.yml":
+			return workflow.Parse([]byte(svc))
+		case "./.github/workflows/lint.yml":
+			return workflow.Parse([]byte(lintWf))
+		}
+		return nil, errors.New("not found")
+	}
+	nodes := Build(wf, nil, resolve)
+	var dev *Node
+	for i := range nodes {
+		if nodes[i].ID == "dev" {
+			dev = &nodes[i]
+		}
+	}
+	if dev == nil || len(dev.Children) != 4 || dev.State != "pending" {
+		t.Fatalf("skeleton dev: %+v", dev)
+	}
+	for _, c := range dev.Children {
+		if c.ID == "api" && (len(c.Children) != 2 || c.Children[0].ID != "setup") {
+			t.Fatalf("nested skeleton api: %+v", c)
+		}
+	}
+}

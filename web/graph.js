@@ -55,9 +55,9 @@ const GHRV = (() => {
   function runDur(r) {
     return span(r.run_started_at || r.created_at, r.status === 'completed' ? r.updated_at : null);
   }
-  function nodeDur(n) {
+  function nodeDurOf(jobs) {
     let start = null, end = null, open = false;
-    for (const j of n.jobs) {
+    for (const j of jobs) {
       if (!j.started_at) continue;
       const s = new Date(j.started_at);
       if (!start || s < start) start = s;
@@ -74,7 +74,6 @@ const GHRV = (() => {
     }
   }
   function allJobs(n, out = []) { out.push(...n.jobs); (n.children || []).forEach(c => allJobs(c, out)); return out; }
-  const subtreeDur = n => nodeDur({ jobs: allJobs(n) });
   const lastSeg = name => { const i = name.lastIndexOf(' / '); return i < 0 ? name : name.slice(i + 3); };
 
   // ---------- layout ----------
@@ -484,7 +483,14 @@ const GHRV = (() => {
         <aside class="ghrv-side"></aside>
       </div>`;
     const $ = sel => host.querySelector(sel);
-    const st = { data: null, selected: null, expanded: new Set(), cache: new Map(), zoom: 1, tx: 0, ty: 0, autoFit: true, lay: null, hovered: null, dragged: false };
+    // Jobs that were not re-run keep their timestamps from an earlier attempt; durations only count
+    // jobs of the current attempt when the run has any, and such jobs are flagged in the side panel.
+    let runStart = null;
+    const inAttempt = j => !runStart || !j.started_at || new Date(j.started_at) >= runStart;
+    const attemptJobs = jobs => { const cur = jobs.filter(inAttempt); return cur.length ? cur : jobs; };
+    const nodeDur = n => nodeDurOf(attemptJobs(n.jobs));
+    const subtreeDur = n => nodeDurOf(attemptJobs(allJobs(n)));
+    const st = { data: null, selected: null, expanded: new Set(), cache: new Map(), zoom: 1, tx: 0, ty: 0, autoFit: true, lay: null, hovered: null, dragged: false, details: new Map(), loading: new Set() };
 
     const findNode = path => { for (const x of walk(st.data.nodes)) if (x.path === path) return x.n; return null; };
     const findJob = id => { for (const { n } of walk(st.data.nodes)) for (const j of n.jobs) if (j.id === id) return j; return null; };
@@ -792,13 +798,14 @@ const GHRV = (() => {
           ${n.children?.length ? list(n.children, st.selected) : ''}
           ${n.jobs.map(j => {
             const s = stateOf(j);
+            if (!j.steps) loadDetails(j);
             return `<div class="ghrv-job">
               <div class="ghrv-job-head">${icon(s)} <a href="${esc(j.html_url)}" target="_blank" rel="noopener">${esc(lastSeg(j.name))}</a><span class="ghrv-dur" data-job-dur="${j.id}">${fmtDur(span(j.started_at, j.completed_at))}</span></div>
-              <div class="ghrv-job-sub">${esc(j.status)}${j.conclusion ? ` · ${esc(j.conclusion)}` : ''}${j.runner_name ? ` · ${esc(j.runner_name)}` : ''}</div>
-              <ul class="ghrv-steps">${(j.steps || []).map(stp => {
+              <div class="ghrv-job-sub">${esc(j.status)}${j.conclusion ? ` · ${esc(j.conclusion)}` : ''}${j.runner_name ? ` · ${esc(j.runner_name)}` : ''}${inAttempt(j) ? '' : ' · from an earlier attempt'}</div>
+              ${j.steps ? `<ul class="ghrv-steps">${j.steps.map(stp => {
                 const ss = stateOf(stp);
                 return `<li class="gs-${ss}">${icon(ss)} <span>${esc(stp.name)}</span><span class="ghrv-dur">${fmtDur(span(stp.started_at, stp.completed_at))}</span></li>`;
-              }).join('')}</ul>
+              }).join('')}</ul>` : `<div class="ghrv-job-sub ghrv-muted">${opts.loadJob ? 'Loading steps…' : ''}</div>`}
             </div>`;
           }).join('')}`;
       }
@@ -807,6 +814,23 @@ const GHRV = (() => {
         expandAncestors(st.selected);
         renderGraph(); renderSide();
       }));
+    }
+
+    // Steps are not part of the run response; they are fetched per job when its panel is shown and
+    // remembered for completed jobs, so a poll only re-fetches jobs that are still running.
+    function applyDetails(data) {
+      for (const { n } of walk(data.nodes)) for (const j of n.jobs) {
+        const d = st.details.get(j.id);
+        if (d && (d.status === 'completed' || !j.steps)) { j.steps = d.steps; j.runner_name = d.runner_name || j.runner_name; }
+      }
+    }
+    function loadDetails(j) {
+      if (!opts.loadJob || st.loading.has(j.id)) return;
+      st.loading.add(j.id);
+      opts.loadJob(j.id).then(d => {
+        st.details.set(j.id, { steps: d.steps || [], runner_name: d.runner_name, status: d.status });
+        if (st.data) { applyDetails(st.data); if (st.selected) renderSide(); }
+      }).catch(() => {}).finally(() => st.loading.delete(j.id));
     }
 
     function tick() {
@@ -839,6 +863,7 @@ const GHRV = (() => {
       update(data) {
         const first = !st.data;
         st.data = data;
+        applyDetails(data);
         const warn = $('.ghrv-warn');
         warn.hidden = !data.workflow?.error && !data.partial;
         warn.classList.toggle('ghrv-note', !!data.partial && !data.workflow?.error);
@@ -851,7 +876,11 @@ const GHRV = (() => {
           cap.innerHTML = `<b>${file}</b>${run.event ? `<div>on: ${esc(run.event)}</div>` : ''}`;
           cap.hidden = false;
         }
-        if (first && opts.expandAll) for (const { n, path } of walk(data.nodes)) if (n.children?.length) st.expanded.add(path);
+        if (opts.expandAll && !st.expandAllDone) {
+          for (const { n, path } of walk(data.nodes)) if (n.children?.length) st.expanded.add(path);
+          st.expandAllDone = !data.partial;
+        }
+        runStart = run.run_started_at ? new Date(run.run_started_at) : null;
         renderGraph(); renderSide();
       },
       error(msg) {

@@ -115,7 +115,7 @@
       return;
     }
     if (current !== placeholder) return;
-    const view = GHRV.mount(host, {});
+    const view = GHRV.mount(host, { loadJob: jobId => request(`${server()}/api/jobs/${jobId}?repo=${encodeURIComponent(info.repo)}`) });
     const bar = host.querySelector('.ghrv-bar');
     const ghBtn = document.createElement('button');
     ghBtn.dataset.act = 'gh-graph';

@@ -87,6 +87,7 @@ type Run struct {
 	HeadSHA      string     `json:"head_sha"`
 	HTMLURL      string     `json:"html_url"`
 	WorkflowID   int64      `json:"workflow_id"`
+	CheckSuiteID int64      `json:"check_suite_id"`
 	CreatedAt    time.Time  `json:"created_at"`
 	UpdatedAt    time.Time  `json:"updated_at"`
 	RunStartedAt *time.Time `json:"run_started_at"`
@@ -296,6 +297,78 @@ func (c *Client) ListDir(ctx context.Context, repo, dir, ref string) ([]Entry, e
 func (c *Client) Blob(ctx context.Context, repo, sha string) ([]byte, error) {
 	body, _, err := c.do(ctx, "/repos/"+repo+"/git/blobs/"+url.PathEscape(sha), nil, "application/vnd.github.raw+json")
 	return body, err
+}
+
+// GetJob returns one job including its steps and runner.
+func (c *Client) GetJob(ctx context.Context, repo string, id int64) (*Job, error) {
+	body, _, err := c.do(ctx, fmt.Sprintf("/repos/%s/actions/jobs/%d", repo, id), nil, "")
+	if err != nil {
+		return nil, err
+	}
+	var j Job
+	if err := json.Unmarshal(body, &j); err != nil {
+		return nil, err
+	}
+	if j.Steps == nil {
+		j.Steps = []Step{}
+	}
+	return &j, nil
+}
+
+// ListCheckRuns returns the latest check runs of a check suite as jobs without steps. The check-runs
+// endpoint answers several times faster than the jobs endpoint, which also serialises every step.
+func (c *Client) ListCheckRuns(ctx context.Context, repo string, suiteID int64) ([]Job, error) {
+	path := fmt.Sprintf("/repos/%s/check-suites/%d/check-runs", repo, suiteID)
+	type page struct {
+		Total int   `json:"total_count"`
+		Runs  []Job `json:"check_runs"`
+	}
+	fetch := func(n int) (*page, error) {
+		q := url.Values{"per_page": {"100"}, "filter": {"latest"}, "page": {strconv.Itoa(n)}}
+		body, _, err := c.do(ctx, path, q, "")
+		if err != nil {
+			return nil, err
+		}
+		var p page
+		if err := json.Unmarshal(body, &p); err != nil {
+			return nil, err
+		}
+		return &p, nil
+	}
+	first, err := fetch(1)
+	if err != nil {
+		return nil, err
+	}
+	all := first.Runs
+	pages := (first.Total + 99) / 100
+	if pages > 20 {
+		pages = 20
+	}
+	if pages > 1 {
+		rest := make([][]Job, pages-1)
+		errs := make([]error, pages-1)
+		var wg sync.WaitGroup
+		for n := 2; n <= pages; n++ {
+			wg.Add(1)
+			go func(n int) {
+				defer wg.Done()
+				p, err := fetch(n)
+				if err != nil {
+					errs[n-2] = err
+					return
+				}
+				rest[n-2] = p.Runs
+			}(n)
+		}
+		wg.Wait()
+		for i, err := range errs {
+			if err != nil {
+				return nil, err
+			}
+			all = append(all, rest[i]...)
+		}
+	}
+	return all, nil
 }
 
 // FileAt returns the raw content of path in repo at ref.
