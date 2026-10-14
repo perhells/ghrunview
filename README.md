@@ -1,56 +1,70 @@
 # ghrunview
 
-Local browser UI for GitHub Actions runs. Draws each run as a dependency graph
-(`needs:` edges), expands reusable workflows and matrix jobs into nested boxes,
-and shows per-job steps and timings. Polls while a run is in progress.
+A nested job-dependency graph for GitHub Actions runs, rendered inside
+github.com by a Tampermonkey userscript and backed by a small local server.
 
-## Run
+![ghrunview embedded in a GitHub Actions run page](docs/screenshot.png)
+
+GitHub's own run graph shows top-level jobs only. ghrunview draws `needs:`
+edges as orthogonal arrows that never cross a box, expands reusable workflows
+into nested boxes (recursively, including `owner/repo/...@ref` references),
+groups matrix jobs into one box with a row per value, and shows steps and
+timings for the selected job. It polls while a run is in progress.
+
+## Install
+
+1. Build and start the server. It reads your token from `GH_TOKEN`,
+   `GITHUB_TOKEN` or `gh auth token` and only listens on loopback.
+
+   ```sh
+   go install github.com/perhells/ghrunview@latest
+   ghrunview -open=false
+   ```
+
+2. With [Tampermonkey](https://www.tampermonkey.net/) installed, open
+   <http://127.0.0.1:8788/ghrunview.user.js> and accept the install dialog.
+
+3. Open any `github.com/<owner>/<repo>/actions/runs/<id>` page. The graph
+   appears under GitHub's run summary, themed with GitHub's own light and
+   dark colours. GitHub's graph is hidden behind a "Show GitHub graph"
+   toggle.
+
+The script talks to the server with `GM_xmlhttpRequest`, so GitHub's CSP and
+CORS do not get in the way; the server deliberately sets no CORS headers and
+rejects non-loopback `Host` headers, so other websites cannot read your runs
+through it. The server address is baked in from the URL you installed from
+and can be changed from Tampermonkey's menu ("Set ghrunview server URL").
+
+The renderer is bundled through `@require` and, where the userscript sandbox
+allows `eval`, refreshed from the server on every page load. After upgrading
+and restarting the server, run "Check for userscript updates" in
+Tampermonkey (or reinstall from the link) to pick up a new version.
+
+## Using the graph
+
+- Reusable-workflow boxes start collapsed; click to expand, click again to
+  collapse. "Expand all" / "Collapse all" re-fit the view.
+- Hover highlights a box's edges and neighbours; the selected box and its
+  edges are blue; truncated labels expand after a short hover.
+- Scroll pans, ctrl/⌘+scroll or pinch zooms around the cursor, drag pans,
+  double-click on empty canvas fits. The view auto-fits after every
+  expand/collapse until you pan or zoom by hand.
+- The side panel lists jobs with runner, steps and durations and links to
+  the logs on GitHub.
+
+## Standalone page
+
+The server also serves the same UI at <http://127.0.0.1:8788/>: a run list
+with branch/status/event/workflow filters and the run view. Any repository
+can be opened from the input in the top bar; the URL hash carries it
+(`#/owner/repo`, `#/owner/repo/run/<id>`, `?expand` opens every group).
 
 ```sh
-go install .            # or: go build -o ghrunview .
 cd some/repo && ghrunview          # repo from `git remote get-url origin`
 ghrunview -repo octocat/hello-world
 ghrunview -addr 127.0.0.1:9000 -open=false
+ghrunview -dev                     # serve web/ from disk while developing
 ```
-
-Auth: `GH_TOKEN`, `GITHUB_TOKEN`, or `gh auth token` (needs `repo` / `actions:read`
-and `contents:read`; remote reusable workflows need read access to that repo too).
-
-Any repo can be opened from the input in the top bar; the URL hash carries it:
-`#/owner/repo` and `#/owner/repo/run/<id>` (`?expand` opens every group).
-
-In the run view every reusable-workflow box starts collapsed. Click a box to
-expand it, click again to collapse. Hovering a box highlights its edges and
-neighbours in white, the selected box in blue. Edges are routed orthogonally
-through free rows so they never cross other boxes.
-
-The canvas captures the wheel: scroll pans, ctrl/⌘+scroll or pinch zooms around
-the cursor, drag pans, double-click on empty space fits. The graph auto-fits
-after every expand/collapse until you pan or zoom by hand; "Fit" re-enables that.
-
-## Inside github.com (Tampermonkey)
-
-With the server running, open `http://127.0.0.1:8788/ghrunview.user.js` (or the
-Userscript link in the top bar). Tampermonkey shows its install dialog. The
-script then renders the same graph on every `github.com/<owner>/<repo>/actions/runs/<id>`
-page, right under GitHub's run summary box, themed with GitHub's own colour
-variables (light and dark).
-
-- The script talks to the server with `GM_xmlhttpRequest`, so GitHub's CSP and
-  CORS do not get in the way. The server never sets CORS headers on purpose:
-  other websites must not be able to read your runs through it.
-- The server address is baked in from the URL you installed from. Change it
-  from Tampermonkey's menu ("Set ghrunview server URL").
-- The renderer (`graph.js`) is bundled through `@require` and, where the
-  userscript sandbox allows `eval`, a fresh copy is also fetched from the
-  server on every page load. github.com's CSP forbids `eval` in the page
-  context, so with Tampermonkey's default sandbox you get the bundled copy;
-  `@sandbox raw` asks for the isolated context where the fresh copy works.
-  `@updateURL` points back at the server and `@version` is derived from
-  server start time, so after a restart an update check (or a reinstall from
-  the link) refreshes both the shim and the bundled renderer.
-- The script re-attaches after GitHub's Turbo navigations and after GitHub's
-  live-update swaps the run summary DOM.
 
 ## How the graph is built
 
@@ -58,11 +72,15 @@ variables (light and dark).
 2. The workflow file at the run's `head_sha` is fetched and parsed for `jobs`,
    `needs`, `strategy.matrix`, `if` and `uses`.
 3. API job names (`Caller / Inner (matrix) / Leaf`) are matched back to the
-   definitions; `uses:` targets (`./.github/...` and `owner/repo/path@ref`) are
-   fetched recursively so nested reusable workflows get their own sub-DAG.
-4. Jobs that cannot be matched are still shown, grouped by name, without edges.
+   definitions; `uses:` targets (`./.github/...` and `owner/repo/path@ref`)
+   are fetched recursively so nested reusable workflows get their own
+   sub-DAG, and calls that wrap a single job are flattened into it.
+4. Jobs that cannot be matched are still shown, grouped by name, without
+   edges. Dependabot, Pages and default-setup CodeQL runs have no workflow
+   file and show their jobs without edges.
 
-Files are cached per `sha` in memory for the lifetime of the process.
+Workflow files are cached per `sha` in memory for the lifetime of the
+process.
 
 ## Layout
 
@@ -74,5 +92,13 @@ internal/graph          match API jobs to definitions, nest reusable workflows
 internal/server         /api/config, /api/runs, /api/runs/{id}, /ghrunview.user.js, static UI
 web/graph.js            shared renderer (layout, routing, SVG, hover/select, side panel)
 web/app.js              standalone page: routing, run list, run header
-web/userscript.js       Tampermonkey shim; served concatenated with graph.js
+web/userscript.js       Tampermonkey shim; served with a generated header
 ```
+
+## Limits
+
+- github.com only; GitHub Enterprise hosts are not supported.
+- `pull_request_target` and `workflow_run` runs execute the base-branch
+  workflow file, but ghrunview reads the file at `head_sha`, so definitions
+  can differ.
+- Matrix values containing `)` or job names containing ` / ` can mis-match.
