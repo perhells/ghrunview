@@ -93,7 +93,7 @@ const userscriptHeader = `// ==UserScript==
 // @namespace    ghrunview
 // @version      %s
 // @description  Nested job dependency graph for GitHub Actions runs, rendered by a local ghrunview server (renderer loaded from it at runtime)
-// @match        https://github.com/*/*/actions/runs/*
+// @match        https://github.com/*
 // @grant        GM_xmlhttpRequest
 // @grant        GM_getValue
 // @grant        GM_setValue

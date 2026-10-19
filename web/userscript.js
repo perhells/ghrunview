@@ -14,10 +14,10 @@
   // the server and evaluated when the sandbox allows eval (github.com's CSP forbids it in the page
   // context), so renderer changes show up on reload where possible and on update otherwise.
   const bundled = typeof GHRV !== 'undefined' ? GHRV : null;
-  let evalBlocked = false;
-  try { (0, eval)('1'); } catch { evalBlocked = true; }
-  let renderer = null;
+  let evalBlocked, renderer = null;
   function loadRenderer() {
+    // Probed only on run pages: in the page context the probe logs a CSP violation.
+    if (evalBlocked === undefined) try { (0, eval)('1'); evalBlocked = false; } catch { evalBlocked = true; }
     if (evalBlocked) return bundled ? Promise.resolve() : Promise.reject(new Error('renderer missing: reinstall the userscript'));
     return renderer ||= new Promise(resolve => {
       const fallback = () => { renderer = null; resolve(); };
@@ -154,13 +154,14 @@
     html.ghrv-hide-gh .js-updatable-content[data-url$="/graph_partial"], html.ghrv-hide-gh action-graph { display: none !important; }`;
   document.head.appendChild(style);
 
+  // @match covers all of github.com because GitHub navigates client-side and Tampermonkey only injects on full loads.
   document.addEventListener('turbo:load', setup);
   document.addEventListener('turbo:render', setup);
   window.addEventListener('popstate', () => setTimeout(setup, 200));
   let last = location.href;
   setInterval(() => {
     if (location.href !== last) { last = location.href; setup(); }
-    else if (current && !document.contains(current.host)) setup();
+    else if (current ? !document.contains(current.host) : runInfo()) setup();
   }, 1000);
   setup();
 })();
