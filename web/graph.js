@@ -364,6 +364,10 @@ const GHRV = (() => {
 
   const svgIcon = (s, x, y) => `<g class="ghrv-st gs-${s}" transform="translate(${x},${y})">${icon(s).replace('class="ghrv-ico', 'width="16" height="16" class="ghrv-ico')}</g>`;
 
+  // jobLink draws a 12px link-external icon at (x, y) that opens the job's log on GitHub.
+  const LINK_W = 18;
+  const jobLink = (j, x, y) => j.html_url ? `<a class="ghrv-link" href="${esc(j.html_url)}" target="_blank" rel="noopener" transform="translate(${x},${y})"><title>Open job log</title><rect x="-4" y="-4" width="20" height="20"/><path transform="scale(.75)" d="M3.75 2h3.5a.75.75 0 0 1 0 1.5h-3.5a.25.25 0 0 0-.25.25v8.5c0 .138.112.25.25.25h8.5a.25.25 0 0 0 .25-.25v-3.5a.75.75 0 0 1 1.5 0v3.5A1.75 1.75 0 0 1 12.25 14h-8.5A1.75 1.75 0 0 1 2 12.25v-8.5C2 2.784 2.784 2 3.75 2Zm6.854-1h4.146a.25.25 0 0 1 .25.25v4.146a.25.25 0 0 1-.427.177L13.03 4.03 9.28 7.78a.751.751 0 0 1-1.042-.018.751.751 0 0 1-.018-1.042l3.75-3.75-1.543-1.543A.25.25 0 0 1 10.604 1Z"/></a>` : '';
+
   const STYLE = `
 .ghrv { --p: var(--panel, #161b22); --p2: var(--panel2, #1c2129); --b: var(--border, #30363d); --t: var(--text, #e6edf3); --m: var(--muted, #8b949e);
   --a: var(--accent, #58a6ff); --ok: var(--success, #3fb950); --bad: var(--failure, #f85149); --run: var(--running, #d29922); --q: var(--queued, #8b949e);
@@ -432,6 +436,10 @@ const GHRV = (() => {
 .ghrv .ghrv-node text.ghrv-tb { fill: var(--m); font-size: 11px; }
 .ghrv .ghrv-node text.ghrv-row { font-size: 12px; }
 .ghrv .ghrv-node text.ghrv-chev { fill: var(--m); font-size: 13px; }
+.ghrv .ghrv-link { color: var(--m); }
+.ghrv .ghrv-link:hover { color: var(--a); }
+.ghrv .ghrv-link rect { fill: transparent; }
+.ghrv .ghrv-link path { fill: currentColor; }
 .ghrv .gs-success > .ghrv-strip { fill: var(--ok); }
 .ghrv .gs-failure > .ghrv-strip { fill: var(--bad); }
 .ghrv .gs-running > .ghrv-strip { fill: var(--run); }
@@ -535,8 +543,8 @@ const GHRV = (() => {
         if (n.jobs.length > 1) {
           const { base, value } = matrixParts(n);
           const rows = n.jobs.map((j, i) => {
-            const s = stateOf(j), y = GH + 4 + i * ROW;
-            return `${svgIcon(s, 14, y + 3)}${lbl(38, y + 15, value(j), W - 56 - textWidth(fmtDur(span(j.started_at, j.completed_at)), 11), 'ghrv-row')}<text class="ghrv-sub" x="${W - 10}" y="${y + 15}" text-anchor="end" data-job-dur="${j.id}">${fmtDur(span(j.started_at, j.completed_at))}</text>`;
+            const s = stateOf(j), y = GH + 4 + i * ROW, lw = j.html_url ? LINK_W : 0;
+            return `${svgIcon(s, 14, y + 3)}${lbl(38, y + 15, value(j), W - 56 - lw - textWidth(fmtDur(span(j.started_at, j.completed_at)), 11), 'ghrv-row')}<text class="ghrv-sub" x="${W - 10 - lw}" y="${y + 15}" text-anchor="end" data-job-dur="${j.id}">${fmtDur(span(j.started_at, j.completed_at))}</text>${jobLink(j, W - 22, y + 5)}`;
           }).join('');
           return `<g class="${cls} ghrv-leaf" data-path="${esc(it.path)}" transform="translate(${it.x},${it.y})">${title}
             <rect class="ghrv-box" width="${it.w}" height="${it.h}"/><rect class="ghrv-head" width="${it.w}" height="${GH}"/>${strip(it.h)}<rect class="ghrv-outline" width="${it.w}" height="${it.h}"/>
@@ -547,10 +555,12 @@ const GHRV = (() => {
           </g>`;
         }
         const extra = n.reusable && !n.jobs.length ? 'no jobs' : n.jobs.length === 0 ? 'pending' : '';
+        const link = n.jobs.length ? jobLink(n.jobs[0], W - 22, 13) : '';
         return `<g class="${cls} ghrv-leaf" data-path="${esc(it.path)}" transform="translate(${it.x},${it.y})">${title}
           <rect class="ghrv-box" width="${it.w}" height="${it.h}"/>${strip(it.h)}<rect class="ghrv-outline" width="${it.w}" height="${it.h}"/>
           ${svgIcon(n.state, 14, 11)}
-          ${lbl(38, 24, n.label, W - 48)}
+          ${lbl(38, 24, n.label, W - 48 - (link ? LINK_W : 0))}
+          ${link}
           <text class="ghrv-sub" x="38" y="43" data-dur="${esc(it.path)}">${fmtDur(nodeDur(n))}</text>
           ${extra ? `<text class="ghrv-tb" x="${W - 10}" y="43" text-anchor="end">${esc(extra)}</text>` : ''}
         </g>`;
@@ -746,6 +756,7 @@ const GHRV = (() => {
       st.hovered = null;
       svg.addEventListener('click', e => {
         if (st.dragged) { st.dragged = false; return; }
+        if (e.target.closest('.ghrv-link')) return;
         const g = targetNode(e);
         if (!g) {
           if (st.selected) { st.selected = null; renderGraph(); renderSide(); }
