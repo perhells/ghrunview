@@ -58,7 +58,10 @@ ghrunview service uninstall
 ```
 
 The service runs the binary it was installed from, so after `go install`
-run `service install` again to pick up the new build. Token lookup via
+run `service install` again to pick up the new build (from a checkout:
+`go install . && ghrunview service install`). `service install` stops a
+running copy of the service first and fails if any other process, such as a
+`ghrunview` started in a terminal, still holds the address. Token lookup via
 `gh auth token` works under the service because the directory of `gh` is
 added to its PATH; alternatively set `GH_TOKEN` in the generated plist or
 unit.

@@ -3,13 +3,17 @@
 package service
 
 import (
+	"errors"
 	"fmt"
+	"net"
 	"os"
 	"os/exec"
 	"os/user"
 	"path/filepath"
 	"runtime"
 	"strings"
+	"syscall"
+	"time"
 )
 
 const label = "com.github.perhells.ghrunview"
@@ -76,6 +80,10 @@ func installLaunchd(exe, addr, path string) error {
 	}
 	home, _ := os.UserHomeDir()
 	logFile := filepath.Join(home, "Library", "Logs", "ghrunview.log")
+	_ = exec.Command("launchctl", "bootout", domain(), p).Run() // not loaded yet on first install
+	if err := checkAddr(addr); err != nil {
+		return err
+	}
 	plist := fmt.Sprintf(`<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -103,7 +111,6 @@ func installLaunchd(exe, addr, path string) error {
 	if err := os.WriteFile(p, []byte(plist), 0o644); err != nil {
 		return err
 	}
-	_ = exec.Command("launchctl", "bootout", domain(), p).Run() // not loaded yet on first install
 	if err := run("launchctl", "bootstrap", domain(), p); err != nil {
 		return err
 	}
@@ -114,6 +121,11 @@ func installLaunchd(exe, addr, path string) error {
 func installSystemd(exe, addr, path string) error {
 	p, err := unitPath()
 	if err != nil {
+		return err
+	}
+	// enable --now leaves an already running unit alone, so stop it to start the new build.
+	_ = exec.Command("systemctl", "--user", "stop", "ghrunview").Run()
+	if err := checkAddr(addr); err != nil {
 		return err
 	}
 	unit := fmt.Sprintf(`[Unit]
@@ -142,6 +154,26 @@ WantedBy=default.target
 	}
 	fmt.Printf("installed %s\nlogs: journalctl --user -u ghrunview\n", p)
 	return nil
+}
+
+// checkAddr gives a just-stopped service a moment to release addr, then fails if another process
+// still holds it, since the service would otherwise retry in the background without a word.
+func checkAddr(addr string) error {
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		ln, err := net.Listen("tcp", addr)
+		if err == nil {
+			return ln.Close()
+		}
+		if !errors.Is(err, syscall.EADDRINUSE) {
+			return err
+		}
+		if time.Now().After(deadline) {
+			_, port, _ := net.SplitHostPort(addr)
+			return fmt.Errorf("%s is in use by another process (a ghrunview started in a terminal?); stop it and run `ghrunview service install` again. Find it with: lsof -nP -iTCP:%s -sTCP:LISTEN", addr, port)
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
 }
 
 func plistPath() (string, error) {
